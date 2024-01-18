@@ -25,7 +25,7 @@ contract Business is Ownable {
     }
 
     constructor(address[] memory allSigners, address usdc) Ownable(msg.sender) {
-        require(allSigners.length == 3, "invalid withdrawalMgrs length");
+        require(allSigners.length == 3, "invalid signers length");
         require(allSigners[0] != allSigners[1], "must be different signers");
         require(allSigners[0] != allSigners[2], "must be different signers");
         require(allSigners[1] != allSigners[2], "must be different signers");
