@@ -1,3 +1,5 @@
+.PHONY: test
+
 install:
 	npm install --verbos
 	
@@ -6,3 +8,7 @@ clean:
 
 compile:
 	npx hardhat compile
+
+test:
+	npx hardhat test
+

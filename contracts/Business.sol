@@ -3,9 +3,11 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import "hardhat/console.sol";
 
 contract Business is Ownable {
     using SafeERC20 for IERC20;
@@ -17,7 +19,7 @@ contract Business is Ownable {
     bool isDisabled; // status bit that control whether a contract is available
 
     mapping(address => uint256) public balances; // users' balances
-    uint256 public banlanceOfOwner; // owner's balance
+    uint256 public balanceOfOwner; // owner's balance
 
     modifier notDisabled() {
         require(!isDisabled, "Contract is disabled.");
@@ -43,11 +45,11 @@ contract Business is Ownable {
      * @param amount    the amount in Wei to be deposited
      */
     function deposit(
-        IERC20 token,
+        address token,
         uint256 amount
     ) external payable notDisabled {
-        if (address(token) == USDC_ADDRESS) {
-            token.safeTransferFrom(msg.sender, address(this), amount);
+        if (token == USDC_ADDRESS) {
+            IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
             balances[msg.sender] += amount;
         } else {
             // TODO: swap other currency to USDC
@@ -78,25 +80,17 @@ contract Business is Ownable {
         require(allSigners[0] != allSigners[1], "can not be same signer");
         require(expireTime >= block.timestamp, "expired transaction");
 
-        bytes32 operationHash = keccak256(
-            abi.encodePacked(
-                "ERC20",
-                to,
-                amount,
-                USDC_ADDRESS,
-                expireTime,
-                address(this)
-            )
-        );
+        bytes32 operationHash = _hashWithdraw(to, amount, expireTime);
+        operationHash = MessageHashUtils.toEthSignedMessageHash(operationHash);
 
-        for (uint8 index = 0; index < signers.length; index++) {
+        for (uint8 index = 0; index < allSigners.length; index++) {
             address signer = ECDSA.recover(operationHash, signatures[index]);
-            require(signer == signers[index], "invalid signer");
+            require(signer == allSigners[index], "invalid signer");
             require(_isAllowedSigner(signer), "not allowed signer");
         }
 
         IERC20(USDC_ADDRESS).safeTransfer(to, amount);
-        banlanceOfOwner -= amount;
+        balanceOfOwner -= amount;
     }
 
     /**
@@ -124,27 +118,24 @@ contract Business is Ownable {
         require(allSigners[0] != allSigners[1], "can not be same signer");
         require(expireTime >= block.timestamp, "expired transaction");
 
-        bytes32 operationHash = keccak256(
-            abi.encodePacked(
-                "ERC20",
-                receivers,
-                amounts,
-                USDC_ADDRESS,
-                expireTime,
-                address(this)
-            )
-        );
+        bytes32 operationHash = _hasWithdraws(receivers, amounts, expireTime);
+        operationHash = MessageHashUtils.toEthSignedMessageHash(operationHash);
 
-        for (uint8 index = 0; index < signers.length; index++) {
+        for (uint8 index = 0; index < allSigners.length; index++) {
             address signer = ECDSA.recover(operationHash, signatures[index]);
-            require(signer == signers[index], "invalid signer");
+            require(signer == allSigners[index], "invalid signer");
             require(_isAllowedSigner(signer), "not allowed signer");
         }
 
         for (uint8 index = 0; index < receivers.length; index++) {
             address to = receivers[index];
             uint256 amount = amounts[index];
+
+            require(to != address(0), "invalid address");
+            require(amount > 0, "invalid amount");
+            require(balances[to] >= amount, "insufficient balance");
             IERC20(USDC_ADDRESS).safeTransfer(to, amount);
+            balances[to] -= amount;
         }
     }
 
@@ -152,12 +143,14 @@ contract Business is Ownable {
      *
      * @param accounts      the accounts to be settled
      * @param amounts       the amounts to be settled
+     * @param expireTime    the number of seconds since 1970 for which this transaction is valid
      * @param allSigners    all signer who sign the tx
      * @param signatures    the signatures of tx
      */
     function settle(
         address[] memory accounts,
         uint256[] memory amounts,
+        uint256 expireTime,
         address[] memory allSigners,
         bytes[] memory signatures
     ) external notDisabled {
@@ -169,12 +162,15 @@ contract Business is Ownable {
             "arrays length mismatch"
         );
         require(allSigners[0] != allSigners[1], "can not be same signer");
+        require(expireTime >= block.timestamp, "expired transaction");
 
-        bytes32 operationHash = keccak256(abi.encodePacked(accounts, amounts));
+        bytes32 operationHash = MessageHashUtils.toEthSignedMessageHash(
+            _hasWithdraws(accounts, amounts, expireTime)
+        );
 
-        for (uint8 index = 0; index < signers.length; index++) {
+        for (uint8 index = 0; index < allSigners.length; index++) {
             address signer = ECDSA.recover(operationHash, signatures[index]);
-            require(signer == signers[index], "invalid signer");
+            require(signer == allSigners[index], "invalid signer");
             require(_isAllowedSigner(signer), "not allowed signer");
         }
 
@@ -184,10 +180,10 @@ contract Business is Ownable {
 
             address account = accounts[i];
             uint256 amount = amounts[i];
-            require(balances[account] >= amount, "insufficient banlance");
+            require(balances[account] >= amount, "insufficient balance");
 
             balances[account] -= amount;
-            banlanceOfOwner += amount;
+            balanceOfOwner += amount;
         }
     }
 
@@ -221,20 +217,60 @@ contract Business is Ownable {
      * get the balance of a given address
      * @param account address to search
      */
-    function banlanceOf(address account) public view returns (uint256) {
-        require(
-            msg.sender == account || msg.sender == this.owner(),
-            "You don't have access to that."
-        );
-
-        return balances[account];
+    function balanceOf(address account) public view returns (uint256) {
+        if (account == owner()) {
+            require(msg.sender == owner(), "You don't have access to that.");
+            return balanceOfOwner;
+        } else {
+            require(
+                msg.sender == account || msg.sender == owner(),
+                "You don't have access to that."
+            );
+            return balances[account];
+        }
     }
 
     /**
      * get the whole balance of this contract
      */
-    function banlance() external view returns (uint256) {
+    function balance() external view returns (uint256) {
         return IERC20(USDC_ADDRESS).balanceOf(address(this));
+    }
+
+    // ============================= internals =============================
+
+    function _hasWithdraws(
+        address[] memory receivers,
+        uint256[] memory amounts,
+        uint256 expireTime
+    ) internal view returns (bytes32) {
+        bytes32 operationHash = keccak256(
+            abi.encodePacked(
+                receivers,
+                amounts,
+                USDC_ADDRESS,
+                expireTime,
+                address(this)
+            )
+        );
+        return operationHash;
+    }
+
+    function _hashWithdraw(
+        address to,
+        uint256 amount,
+        uint256 expireTime
+    ) internal view returns (bytes32) {
+        bytes32 operationHash = keccak256(
+            abi.encodePacked(
+                to,
+                amount,
+                USDC_ADDRESS,
+                expireTime,
+                address(this)
+            )
+        );
+        return operationHash;
     }
 
     function _isAllowedSigner(address signer) internal view returns (bool) {

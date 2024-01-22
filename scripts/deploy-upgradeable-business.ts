@@ -1,6 +1,11 @@
 import { ethers, upgrades } from "hardhat";
 
 async function main() {
+  const signers = await ethers.getSigners();
+  const signer = signers[0];
+  signer;
+  // =============================== test-end ===============================
+
   const Business = await ethers.getContractFactory("Business");
   console.log("Deploying Business...");
   const business = await upgrades.deployProxy(
