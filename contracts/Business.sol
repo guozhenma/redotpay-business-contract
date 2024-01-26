@@ -7,9 +7,10 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "hardhat/console.sol";
 
-contract Business is Ownable {
+contract Business is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using Math for uint256;
 
@@ -47,7 +48,7 @@ contract Business is Ownable {
     function deposit(
         address token,
         uint256 amount
-    ) external payable notDisabled {
+    ) external payable notDisabled nonReentrant {
         if (token == USDC_ADDRESS) {
             IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
             balances[msg.sender] += amount;
@@ -71,7 +72,7 @@ contract Business is Ownable {
         uint256 expireTime,
         address[] memory allSigners,
         bytes[] memory signatures
-    ) external notDisabled {
+    ) external notDisabled nonReentrant {
         require(allSigners.length >= 2, "invalid allSigners length");
         require(
             allSigners.length == signatures.length,
@@ -108,7 +109,7 @@ contract Business is Ownable {
         uint256 expireTime,
         address[] memory allSigners,
         bytes[] memory signatures
-    ) external notDisabled {
+    ) external notDisabled nonReentrant {
         require(receivers.length == amounts.length, "arrays length mismatch");
         require(allSigners.length >= 2, "invalid allSigners length");
         require(
@@ -153,7 +154,7 @@ contract Business is Ownable {
         uint256 expireTime,
         address[] memory allSigners,
         bytes[] memory signatures
-    ) external notDisabled {
+    ) external notDisabled nonReentrant {
         require(accounts.length == amounts.length, "arrays length mismatch");
 
         require(allSigners.length >= 2, "invalid allSigners length");
