@@ -1,33 +1,49 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeMath} from "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "hardhat/console.sol";
+
+import {IAggregationRouterV5} from "./IAggregationRouterV5.sol";
 
 contract Business is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
-    using Math for uint256;
+    using SafeMath for uint256;
+    // Events
+    event Deposit(
+        address from,
+        address token,
+        uint256 spentAmount,
+        uint256 swapReturnAmount
+    );
 
     address public immutable USDC_ADDRESS; // usdc contract address
-
+    address public immutable AGGREGATION_ROUTER_V5_ADDRESS; // 1inch AggregationRouterV5  address
     address[] public signers; // singer's addresses
     bool isDisabled; // status bit that control whether a contract is available
 
     mapping(address => uint256) public balances; // users' balances
     uint256 public balanceOfOwner; // owner's balance
 
+    IERC20 private constant ETH_ADDRESS =
+        IERC20(0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE);
+    IERC20 private constant ZERO_ADDRESS = IERC20(address(0));
+
     modifier notDisabled() {
         require(!isDisabled, "Contract is disabled.");
         _;
     }
 
-    constructor(address[] memory allSigners, address usdc) Ownable(msg.sender) {
+    constructor(
+        address[] memory allSigners,
+        address usdc,
+        address aggregationRouterV5
+    ) Ownable() {
         require(allSigners.length == 3, "invalid signers length");
         require(allSigners[0] != allSigners[1], "must be different signers");
         require(allSigners[0] != allSigners[2], "must be different signers");
@@ -36,9 +52,15 @@ contract Business is Ownable, ReentrancyGuard {
         require(usdc != address(0), "invalid usdc address");
 
         USDC_ADDRESS = usdc;
+        AGGREGATION_ROUTER_V5_ADDRESS = aggregationRouterV5;
         signers = allSigners;
         isDisabled = false;
     }
+
+    /**
+     * Gets called when a transaction is received without calling a method
+     */
+    receive() external payable {}
 
     /**
      * Deposit ERC20 tokens to this wallet. Automatically convert tokens to usdc through DEX.
@@ -47,14 +69,86 @@ contract Business is Ownable, ReentrancyGuard {
      */
     function deposit(
         address token,
-        uint256 amount
-    ) external payable notDisabled nonReentrant {
+        uint256 amount,
+        bytes calldata exchangeData
+    ) external payable notDisabled nonReentrant returns (uint256) {
+        uint256 usdcAmt;
+
         if (token == USDC_ADDRESS) {
             IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
             balances[msg.sender] += amount;
+            usdcAmt = amount;
         } else {
-            // TODO: swap other currency to USDC
+            uint256 beforeSwapBalance = IERC20(USDC_ADDRESS).balanceOf(
+                address(this)
+            );
+            (, IAggregationRouterV5.SwapDescription memory desc, , ) = abi
+                .decode(
+                    exchangeData[4:],
+                    (
+                        address,
+                        IAggregationRouterV5.SwapDescription,
+                        bytes,
+                        bytes
+                    )
+                );
+            require(
+                IERC20(token) == desc.srcToken,
+                "mismatch token and desc.srcToken"
+            );
+            require(
+                USDC_ADDRESS == address(desc.dstToken),
+                "invalid desc.dstToken"
+            );
+            require(amount == desc.amount, "mismatch amount and desc.amount");
+            require(
+                address(this) == desc.dstReceiver,
+                "invalid desc.dstReceiver"
+            );
+
+            bool isNativeToken = _isNative(desc.srcToken);
+            if (!isNativeToken) {
+                // deposit other ERC20 tokens
+                desc.srcToken.safeTransferFrom(
+                    msg.sender,
+                    address(this),
+                    desc.amount
+                );
+
+                // safeApprove requires unsetting the allowance first.
+                desc.srcToken.safeApprove(AGGREGATION_ROUTER_V5_ADDRESS, 0);
+                desc.srcToken.safeApprove(
+                    AGGREGATION_ROUTER_V5_ADDRESS,
+                    desc.amount
+                );
+            }
+
+            // Swap token
+            (
+                bool success,
+                bytes memory returndata
+            ) = AGGREGATION_ROUTER_V5_ADDRESS.call{value: msg.value}(
+                    exchangeData
+                );
+            require(success, "exchange failed");
+
+            (usdcAmt, ) = abi.decode(returndata, (uint256, uint256));
+            require(
+                usdcAmt >= desc.minReturnAmount,
+                "received USDC less than minReturnAmount"
+            );
+
+            uint256 afterSwapBalance = IERC20(USDC_ADDRESS).balanceOf(
+                address(this)
+            );
+            require(
+                afterSwapBalance == beforeSwapBalance.add(usdcAmt),
+                "swap incorrect"
+            );
         }
+
+        emit Deposit(msg.sender, token, amount, usdcAmt);
+        return usdcAmt;
     }
 
     /**
@@ -70,6 +164,7 @@ contract Business is Ownable, ReentrancyGuard {
         address to,
         uint256 amount,
         uint256 expireTime,
+        uint256 orderId,
         address[] memory allSigners,
         bytes[] memory signatures
     ) external notDisabled nonReentrant {
@@ -81,8 +176,8 @@ contract Business is Ownable, ReentrancyGuard {
         require(allSigners[0] != allSigners[1], "can not be same signer");
         require(expireTime >= block.timestamp, "expired transaction");
 
-        bytes32 operationHash = _hashWithdraw(to, amount, expireTime);
-        operationHash = MessageHashUtils.toEthSignedMessageHash(operationHash);
+        bytes32 operationHash = _hashWithdraw(to, amount, expireTime, orderId);
+        operationHash = ECDSA.toEthSignedMessageHash(operationHash);
 
         for (uint8 index = 0; index < allSigners.length; index++) {
             address signer = ECDSA.recover(operationHash, signatures[index]);
@@ -107,6 +202,7 @@ contract Business is Ownable, ReentrancyGuard {
         address[] memory receivers,
         uint256[] memory amounts,
         uint256 expireTime,
+        uint256 orderId,
         address[] memory allSigners,
         bytes[] memory signatures
     ) external notDisabled nonReentrant {
@@ -119,8 +215,13 @@ contract Business is Ownable, ReentrancyGuard {
         require(allSigners[0] != allSigners[1], "can not be same signer");
         require(expireTime >= block.timestamp, "expired transaction");
 
-        bytes32 operationHash = _hasWithdraws(receivers, amounts, expireTime);
-        operationHash = MessageHashUtils.toEthSignedMessageHash(operationHash);
+        bytes32 operationHash = _hasWithdraws(
+            receivers,
+            amounts,
+            expireTime,
+            orderId
+        );
+        operationHash = ECDSA.toEthSignedMessageHash(operationHash);
 
         for (uint8 index = 0; index < allSigners.length; index++) {
             address signer = ECDSA.recover(operationHash, signatures[index]);
@@ -152,6 +253,7 @@ contract Business is Ownable, ReentrancyGuard {
         address[] memory accounts,
         uint256[] memory amounts,
         uint256 expireTime,
+        uint256 orderId,
         address[] memory allSigners,
         bytes[] memory signatures
     ) external notDisabled nonReentrant {
@@ -165,8 +267,8 @@ contract Business is Ownable, ReentrancyGuard {
         require(allSigners[0] != allSigners[1], "can not be same signer");
         require(expireTime >= block.timestamp, "expired transaction");
 
-        bytes32 operationHash = MessageHashUtils.toEthSignedMessageHash(
-            _hasWithdraws(accounts, amounts, expireTime)
+        bytes32 operationHash = ECDSA.toEthSignedMessageHash(
+            _hasWithdraws(accounts, amounts, expireTime, orderId)
         );
 
         for (uint8 index = 0; index < allSigners.length; index++) {
@@ -239,14 +341,20 @@ contract Business is Ownable, ReentrancyGuard {
     }
 
     // ============================= internals =============================
+    function _isNative(IERC20 token_) internal pure returns (bool) {
+        return (token_ == ZERO_ADDRESS || token_ == ETH_ADDRESS);
+    }
 
     function _hasWithdraws(
         address[] memory receivers,
         uint256[] memory amounts,
-        uint256 expireTime
+        uint256 expireTime,
+        uint256 orderId
     ) internal view returns (bytes32) {
         bytes32 operationHash = keccak256(
             abi.encodePacked(
+                orderId,
+                block.chainid,
                 receivers,
                 amounts,
                 USDC_ADDRESS,
@@ -257,13 +365,23 @@ contract Business is Ownable, ReentrancyGuard {
         return operationHash;
     }
 
+    /**
+     *
+     * @param to to
+     * @param amount amount
+     * @param expireTime expireTime
+     *
+     */
     function _hashWithdraw(
         address to,
         uint256 amount,
-        uint256 expireTime
+        uint256 expireTime,
+        uint256 orderId
     ) internal view returns (bytes32) {
         bytes32 operationHash = keccak256(
             abi.encodePacked(
+                orderId,
+                block.chainid,
                 to,
                 amount,
                 USDC_ADDRESS,

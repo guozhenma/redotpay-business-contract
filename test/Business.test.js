@@ -8,6 +8,8 @@ describe("Business", function () {
   let MY_TOEKN_CONTRACT;
   let BUSINESS_CONTRACT;
   let OWNER;
+  const ORDER_ID = 111111;
+  const CHAIN_ID = 31337;
   const USERS = [];
   const SIGNERS = [];
 
@@ -66,6 +68,7 @@ describe("Business", function () {
       SIGNERS.map((v) => {
         return v.address;
       }),
+      MY_TOEKN_CONTRACT.target,
       MY_TOEKN_CONTRACT.target
     );
     await BUSINESS_CONTRACT.waitForDeployment();
@@ -101,7 +104,9 @@ describe("Business", function () {
 
     const amount = toWei(amountNum);
     await myToken.approve(BUSINESS_CONTRACT.target, amount);
-    await business.deposit(MY_TOEKN_CONTRACT.target, amount);
+    const buffer = Buffer.alloc(10);
+    console.log("bytes: ", buffer);
+    await business.deposit(MY_TOEKN_CONTRACT.target, amount, buffer);
 
     const balance1 = await myToken.balanceOf(USERS[0].address);
     const balance2 = await myToken.balanceOf(BUSINESS_CONTRACT.target);
@@ -118,8 +123,18 @@ describe("Business", function () {
     const expireTime = 2000000000;
 
     let opHash = ethers.solidityPacked(
-      ["address[]", "uint256[]", "address", "uint256", "address"],
       [
+        "uint256",
+        "uint256",
+        "address[]",
+        "uint256[]",
+        "address",
+        "uint256",
+        "address",
+      ],
+      [
+        ORDER_ID,
+        CHAIN_ID,
         accounts,
         amounts,
         MY_TOEKN_CONTRACT.target,
@@ -141,6 +156,7 @@ describe("Business", function () {
       accounts,
       amounts,
       expireTime,
+      ORDER_ID,
       [singer1.address, singer2.address],
       [signature1, signature2]
     );
@@ -157,8 +173,18 @@ describe("Business", function () {
     const expireTime = 2000000000;
 
     let opHash = ethers.solidityPacked(
-      ["address[]", "uint256[]", "address", "uint256", "address"],
       [
+        "uint256",
+        "uint256",
+        "address[]",
+        "uint256[]",
+        "address",
+        "uint256",
+        "address",
+      ],
+      [
+        ORDER_ID,
+        CHAIN_ID,
         accounts,
         amounts,
         MY_TOEKN_CONTRACT.target,
@@ -180,6 +206,7 @@ describe("Business", function () {
       accounts,
       amounts,
       expireTime,
+      ORDER_ID,
       [singer1.address, singer2.address],
       [signature1, signature2]
     );
@@ -197,8 +224,18 @@ describe("Business", function () {
     const expireTime = 2000000000;
 
     let opHash = ethers.solidityPacked(
-      ["address", "uint256", "address", "uint256", "address"],
       [
+        "uint256",
+        "uint256",
+        "address",
+        "uint256",
+        "address",
+        "uint256",
+        "address",
+      ],
+      [
+        ORDER_ID,
+        CHAIN_ID,
         to,
         amount,
         MY_TOEKN_CONTRACT.target,
@@ -220,6 +257,7 @@ describe("Business", function () {
       to,
       amount,
       expireTime,
+      ORDER_ID,
       [singer1.address, singer2.address],
       [signature1, signature2]
     );

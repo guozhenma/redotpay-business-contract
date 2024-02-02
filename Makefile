@@ -1,4 +1,4 @@
-.PHONY: test
+.PHONY: test coverage
 
 install:
 	npm install --verbos
@@ -6,9 +6,12 @@ install:
 clean:
 	rm -fr cache artifacts typechain-types
 
-compile:
+compile: clean
 	npx hardhat compile
 
 test:
 	npx hardhat test
+
+coverage:
+	rm -fr coverage && npx hardhat coverage
 
