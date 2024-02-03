@@ -145,6 +145,8 @@ contract Business is Ownable, ReentrancyGuard {
                 afterSwapBalance == beforeSwapBalance.add(usdcAmt),
                 "swap incorrect"
             );
+
+            balances[msg.sender] += usdcAmt;
         }
 
         emit Deposit(msg.sender, token, amount, usdcAmt);
