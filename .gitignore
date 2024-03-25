@@ -1,9 +1,13 @@
 node_modules
-.env
+.env_*
+.vscode
+.DS_Store
+.nvmrc
 
 # Hardhat files
 /cache
 /artifacts
+/output
 
 # TypeChain files
 /typechain
@@ -13,4 +17,5 @@ node_modules
 /coverage
 /coverage.json
 
-contracts/MyToken.sol
+
+package-lock.json

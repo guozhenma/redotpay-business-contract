@@ -1,14 +1,14 @@
 // test/Business.test.js
 // Load dependencies
 const { expect } = require("chai");
-const { ethers } = require("hardhat");
+const { ethers, upgrades } = require("hardhat");
 
 // Start test block
 describe("Business", function () {
   let MY_TOEKN_CONTRACT;
-  let BUSINESS_CONTRACT;
+  let BUSINESS_CONTRACT_PROXY;
   let OWNER;
-  const ORDER_ID = 111111;
+  const ORDER_ID = "111111";
   const CHAIN_ID = 31337;
   const USERS = [];
   const SIGNERS = [];
@@ -23,8 +23,8 @@ describe("Business", function () {
 
   getBusinessIns = (signer) => {
     return new ethers.Contract(
-      BUSINESS_CONTRACT.target,
-      BUSINESS_CONTRACT.interface,
+      BUSINESS_CONTRACT_PROXY.target,
+      BUSINESS_CONTRACT_PROXY.interface,
       signer
     );
   };
@@ -64,15 +64,22 @@ describe("Business", function () {
     await MY_TOEKN_CONTRACT.waitForDeployment();
     console.log("MyToken deployed at: ", MY_TOEKN_CONTRACT.target);
 
-    BUSINESS_CONTRACT = await Business.deploy(
-      SIGNERS.map((v) => {
-        return v.address;
-      }),
-      MY_TOEKN_CONTRACT.target,
-      MY_TOEKN_CONTRACT.target
+    BUSINESS_CONTRACT_PROXY = await upgrades.deployProxy(
+      Business,
+      [
+        OWNER.address,
+        SIGNERS.map((v) => {
+          return v.address;
+        }),
+        MY_TOEKN_CONTRACT.target,
+        MY_TOEKN_CONTRACT.target,
+      ],
+      {
+        initializer: "initialize(address,address[],address,address)",
+      }
     );
-    await BUSINESS_CONTRACT.waitForDeployment();
-    console.log(`Business deployed at: ${BUSINESS_CONTRACT.target}`);
+    await BUSINESS_CONTRACT_PROXY.waitForDeployment();
+    console.log(`Business deployed at: ${BUSINESS_CONTRACT_PROXY.target}`);
   });
 
   // Test case
@@ -103,13 +110,12 @@ describe("Business", function () {
     let business = getBusinessIns(USERS[0]);
 
     const amount = toWei(amountNum);
-    await myToken.approve(BUSINESS_CONTRACT.target, amount);
+    await myToken.approve(BUSINESS_CONTRACT_PROXY.target, amount);
     const buffer = Buffer.alloc(10);
-    console.log("bytes: ", buffer);
-    await business.deposit(MY_TOEKN_CONTRACT.target, amount, buffer);
+    await business.deposit("ddddddd", MY_TOEKN_CONTRACT.target, amount, buffer);
 
     const balance1 = await myToken.balanceOf(USERS[0].address);
-    const balance2 = await myToken.balanceOf(BUSINESS_CONTRACT.target);
+    const balance2 = await myToken.balanceOf(BUSINESS_CONTRACT_PROXY.target);
     expect(toEth(balance1)).to.equal(amountNum);
     expect(toEth(balance2)).to.equal(amountNum);
 
@@ -124,7 +130,7 @@ describe("Business", function () {
 
     let opHash = ethers.solidityPacked(
       [
-        "uint256",
+        "string",
         "uint256",
         "address[]",
         "uint256[]",
@@ -139,7 +145,7 @@ describe("Business", function () {
         amounts,
         MY_TOEKN_CONTRACT.target,
         expireTime,
-        BUSINESS_CONTRACT.target,
+        BUSINESS_CONTRACT_PROXY.target,
       ]
     );
 
@@ -170,13 +176,15 @@ describe("Business", function () {
   it("test withdraws", async () => {
     const accounts = [USERS[0].address];
     const amounts = [toWei(400)];
+    const fees = [0];
     const expireTime = 2000000000;
 
     let opHash = ethers.solidityPacked(
       [
-        "uint256",
+        "string",
         "uint256",
         "address[]",
+        "uint256[]",
         "uint256[]",
         "address",
         "uint256",
@@ -187,9 +195,10 @@ describe("Business", function () {
         CHAIN_ID,
         accounts,
         amounts,
+        fees,
         MY_TOEKN_CONTRACT.target,
         expireTime,
-        BUSINESS_CONTRACT.target,
+        BUSINESS_CONTRACT_PROXY.target,
       ]
     );
 
@@ -205,6 +214,7 @@ describe("Business", function () {
     await business.withdraws(
       accounts,
       amounts,
+      fees,
       expireTime,
       ORDER_ID,
       [singer1.address, singer2.address],
@@ -223,44 +233,9 @@ describe("Business", function () {
     const amount = toWei(100);
     const expireTime = 2000000000;
 
-    let opHash = ethers.solidityPacked(
-      [
-        "uint256",
-        "uint256",
-        "address",
-        "uint256",
-        "address",
-        "uint256",
-        "address",
-      ],
-      [
-        ORDER_ID,
-        CHAIN_ID,
-        to,
-        amount,
-        MY_TOEKN_CONTRACT.target,
-        expireTime,
-        BUSINESS_CONTRACT.target,
-      ]
-    );
+    let business = getBusinessIns(OWNER);
 
-    opHash = ethers.keccak256(opHash);
-
-    const singer1 = SIGNERS[0];
-    let business = getBusinessIns(singer1);
-    const signature1 = await singer1.signMessage(ethers.toBeArray(opHash));
-
-    const singer2 = SIGNERS[1];
-    const signature2 = await singer2.signMessage(ethers.toBeArray(opHash));
-
-    await business.withdraw(
-      to,
-      amount,
-      expireTime,
-      ORDER_ID,
-      [singer1.address, singer2.address],
-      [signature1, signature2]
-    );
+    await business.withdraw(to, amount, expireTime);
 
     const myToken = getMyTokenIns(USERS[0]);
     const balance = await myToken.balanceOf(USERS[0].address);

@@ -6,30 +6,22 @@ async function main() {
   const Business = await ethers.getContractFactory("Business");
   console.log("Deploying Business to ARB...");
 
-  const deployerPrivateKey = process.env.DEPLOYER_PRIVATE_KEY!;
-  const ownerAddress = process.env.OWNER_ADDRESS!;
+  const owner = process.env.DEPLOYER_PRIVATE_KEY!;
   const signers = process.env.SIGNER_ADDRESSES!.split(",");
   const usdcAddress = process.env.USDC_ADDRESS!;
   const oneInchAggregatorAddress = process.env._1INCH_AGGREGATOR_ADDRESS!;
 
-  console.log("owner: ", ownerAddress);
+  console.log("owner: ", owner);
   console.log("signers: ", signers);
   console.log("usdcAddress: ", usdcAddress);
   console.log("oneInchAggregatorAddress: ", oneInchAggregatorAddress);
 
-  const proxy = await upgrades.deployProxy(
-    Business,
-    [ownerAddress,signers, usdcAddress, oneInchAggregatorAddress],
-    {
-      initialOwner: deployerPrivateKey,
-      initializer:'initialize(address,address[],address,address)'
-    }
-  );
+  const business = await Business.deploy(signers,usdcAddress,oneInchAggregatorAddress);
 
-  proxy
+  business
     .waitForDeployment()
     .then(() => {
-      console.log("Business deployed to:", proxy.target);
+      console.log("Business deployed to:", business.target);
     })
     .catch((error: any) => {
       console.error("Error occurred: ", error);
