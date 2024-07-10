@@ -2,7 +2,11 @@ import { ethers, upgrades } from "hardhat";
 import { config } from "dotenv";
 
 async function main() {
-  config({ path: "./.env_op" });
+  const result = configEnv(process.env.NETWORK!);
+  if (!result) {
+    throw new Error(`不支持的网络：${process.env.NETWORK}`);
+  }
+
   const BusinessV2 = await ethers.getContractFactory("BusinessV2");
   console.log("Deploying Business...");
 
@@ -32,6 +36,34 @@ async function main() {
     .catch((error: any) => {
       console.error("Error occurred: ", error);
     });
+}
+
+function configEnv(network: string) {
+  let result = true;
+  switch (network) {
+    case "arb":
+      config({ path: "./.env_arb" });
+      break;
+    case "base":
+      config({ path: "./.env_base" });
+      break;
+    case "bsc":
+      config({ path: "./.env_bsc" });
+      break;
+    case "ethereum":
+      config({ path: "./.env_ethereum" });
+      break;
+    case "op":
+      config({ path: "./.env_op" });
+      break;
+    case "polygon":
+      config({ path: "./.env_polygon" });
+      break;
+    default:
+      result = false;
+      break;
+  }
+  return result;
 }
 
 main();

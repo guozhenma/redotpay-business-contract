@@ -17,9 +17,9 @@ const config: HardhatUserConfig = {
     // },
   },
   networks: {
-    arb: {
-      chainId: 42161,
-      url: `https://arbitrum-mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,
+    eth: {
+      chainId: 1,
+      url: `https://mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,
       accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
     },
     op: {
@@ -27,11 +27,34 @@ const config: HardhatUserConfig = {
       url: `https://optimism-mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,
       accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
     },
+    bsc: {
+      chainId: 56,
+      url: "https://quaint-evocative-bird.bsc.quiknode.pro/e2b4caf64050bcd8a749f90e22c2e0523c04968f/",
+      accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
+    },
+    polygon: {
+      chainId: 137,
+      url: `https://polygon-mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,
+      accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
+    },
+    base: {
+      chainId: 8453,
+      url: `https://arbitrum-mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,
+      accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
+    },
+    arb: {
+      chainId: 42161,
+      url: `https://arbitrum-mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`,
+      accounts: [process.env.DEPLOYER_PRIVATE_KEY!],
+    },
   },
   etherscan: {
     apiKey: {
-      arbitrumOne: "KIBMZW2ZJPCGU2ZY4MQK77ZHU5M7U1TJAW",
+      ethereum: "7YS3G4MVD7RNVMCQYBCRT38H835M9FQMJ9",
       optimisticEthereum: "9FP66Q9WHQ38QH1SRG81ZWPQSQVIU4BAV2",
+      bsc: "6D225IUDVVVADDATQBY98RS5QZAN1K5FDI",
+      polygon: "1Z4NZXZR9DSN3Z12GH8NTVTCJ2PZVXMDK6",
+      arbitrumOne: "KIBMZW2ZJPCGU2ZY4MQK77ZHU5M7U1TJAW",
     },
   },
   sourcify: {

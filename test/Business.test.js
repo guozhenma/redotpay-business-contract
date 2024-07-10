@@ -58,7 +58,7 @@ describe("Business", function () {
     console.log(`Users for Business created: length: ${USERS.length}`);
 
     const MyToken = await ethers.getContractFactory("MyToken", OWNER);
-    const Business = await ethers.getContractFactory("BusinessV2", OWNER);
+    const Business = await ethers.getContractFactory("BusinessV3", OWNER);
 
     MY_TOEKN_CONTRACT = await MyToken.deploy("My USDT", "mUSDT", 10000);
     await MY_TOEKN_CONTRACT.waitForDeployment();
@@ -104,7 +104,7 @@ describe("Business", function () {
     expect(toEth(balance2)).to.equal(1000);
   });
 
-  it("user1 deposit", async () => {
+  it("user1 increaseCreditLimit", async () => {
     const amountNum = 500;
     let myToken = getMyTokenIns(USERS[0]);
     let business = getBusinessIns(USERS[0]);
@@ -112,14 +112,19 @@ describe("Business", function () {
     const amount = toWei(amountNum);
     await myToken.approve(BUSINESS_CONTRACT_PROXY.target, amount);
     const buffer = Buffer.alloc(10);
-    await business.deposit("ddddddd", MY_TOEKN_CONTRACT.target, amount, buffer);
+    await business.increaseCreditLimit(
+      "ddddddd",
+      MY_TOEKN_CONTRACT.target,
+      amount,
+      buffer
+    );
 
     const balance1 = await myToken.balanceOf(USERS[0].address);
     const balance2 = await myToken.balanceOf(BUSINESS_CONTRACT_PROXY.target);
     expect(toEth(balance1)).to.equal(amountNum);
     expect(toEth(balance2)).to.equal(amountNum);
 
-    const balance3 = await business.balances(USERS[0].address);
+    const balance3 = await business.creditLimits(USERS[0].address);
     expect(toEth(balance3)).to.equal(500);
   });
 
@@ -166,15 +171,15 @@ describe("Business", function () {
       [singer1.address, singer2.address],
       [signature1, signature2]
     );
-    const balance = await business.balances(USERS[0].address);
-    expect(toEth(balance)).to.equal(400);
+    const balance = await business.creditLimits(USERS[0].address);
+    expect(toEth(balance)).to.equal(500 - 100);
     let balance2 = await business.balanceOfOwner();
     expect(toEth(balance2)).to.equal(100);
   });
 
-  it("test withdraws", async () => {
+  it("test decreaseCreditLimits", async () => {
     const accounts = [USERS[0].address];
-    const amounts = [toWei(400)];
+    const amounts = [toWei(100)];
     const fees = [0];
     const expireTime = 2000000000;
 
@@ -210,7 +215,7 @@ describe("Business", function () {
     const signature2 = await singer2.signMessage(ethers.toBeArray(opHash));
 
     let business = getBusinessIns(USERS[0]);
-    await business.withdraws(
+    await business.decreaseCreditLimits(
       accounts,
       amounts,
       fees,
@@ -219,12 +224,12 @@ describe("Business", function () {
       [singer1.address, singer2.address],
       [signature1, signature2]
     );
-    const balance = await business.balances(USERS[0].address);
-    expect(toEth(balance)).to.equal(0);
+    const creditLimit = await business.creditLimits(USERS[0].address);
+    expect(toEth(creditLimit)).to.equal(300);
 
     const myToken = getMyTokenIns(USERS[0]);
-    const balance2 = await myToken.balanceOf(USERS[0].address);
-    expect(toEth(balance2)).to.equal(900);
+    const userBalance = await myToken.balanceOf(USERS[0].address);
+    expect(toEth(userBalance)).to.equal(600);
   });
 
   it("test withdraw", async () => {
@@ -238,10 +243,66 @@ describe("Business", function () {
 
     const myToken = getMyTokenIns(USERS[0]);
     const balance = await myToken.balanceOf(USERS[0].address);
-    expect(toEth(balance)).to.equal(1000);
+    expect(toEth(balance)).to.equal(700);
 
     business = getBusinessIns(OWNER);
-    const balance2 = await business.balances(OWNER.address);
+    const balance2 = await business.balanceOfOwner();
     expect(toEth(balance2)).to.equal(0);
+  });
+
+  it("test settle2", async () => {
+    let business = getBusinessIns(OWNER);
+    const creditLimitBefore = await business.creditLimits(USERS[0].address);
+    let balanceOfOwner = await business.balanceOfOwner();
+
+    const accounts = [USERS[0].address];
+    const overAmt = toWei(100);
+    const amounts = [overAmt + creditLimitBefore];
+    const expireTime = 2000000000;
+
+    let opHash = ethers.solidityPacked(
+      [
+        "string",
+        "uint256",
+        "address[]",
+        "uint256[]",
+        "address",
+        "uint256",
+        "address",
+      ],
+      [
+        ORDER_ID,
+        CHAIN_ID,
+        accounts,
+        amounts,
+        MY_TOEKN_CONTRACT.target,
+        expireTime,
+        BUSINESS_CONTRACT_PROXY.target,
+      ]
+    );
+
+    opHash = ethers.keccak256(opHash);
+
+    const singer1 = SIGNERS[0];
+    const signature1 = await singer1.signMessage(ethers.toBeArray(opHash));
+
+    const singer2 = SIGNERS[1];
+    const signature2 = await singer2.signMessage(ethers.toBeArray(opHash));
+
+    await business.settle(
+      accounts,
+      amounts,
+      expireTime,
+      ORDER_ID,
+      [singer1.address, singer2.address],
+      [signature1, signature2]
+    );
+    const creditLimitAfter = await business.creditLimits(USERS[0].address);
+    const overdraftAfter = await business.overdrafts(USERS[0].address);
+    balanceOfOwner = await business.balanceOfOwner();
+
+    expect(creditLimitAfter).to.equal(0);
+    expect(balanceOfOwner).to.equal(creditLimitBefore);
+    expect(overdraftAfter).to.equal(overAmt);
   });
 });
